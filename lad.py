@@ -17,6 +17,7 @@ from lhotse.cut import CutSet
 from lhotse.dataset.input_strategies import BatchIO, PrecomputedFeatures
 from lhotse.utils import ifnone
 import torch
+import numpy
 
 class LadDataset(torch.utils.data.Dataset):
     """
@@ -61,3 +62,21 @@ class LadDataset(torch.utils.data.Dataset):
             "is_laugh": torch.tensor(is_laugh, dtype=torch.int32),
             "cut": cuts,
         }
+
+
+
+class InferenceDataset(torch.utils.data.Dataset):
+    """
+    The PyTorch Dataset for the inference of laughter detection.
+    """ 
+
+    def __init__(self, feats) -> None:
+        super().__init__()
+        self.feats = feats # The feature representation for the whole meeting
+
+    def __len__(self):
+        return len(self.feats)
+
+    def __getitem__(self, index) -> numpy.ndarray: 
+        return self.feats[index,:]
+

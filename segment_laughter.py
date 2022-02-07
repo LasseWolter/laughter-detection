@@ -20,6 +20,7 @@ import pandas as pd
 import scipy
 from tqdm import tqdm
 import tgt
+import load_data
 sys.path.append('./utils/')
 import torch_utils
 import data_loaders
@@ -85,14 +86,18 @@ def load_and_pred(audio_path):
     Loads audio, runs prediction and outputs results according to flag-settings (e.g. TextGrid or Audio)
     '''
     start_time = time.time()  # Start measuring time
-    inference_dataset = data_loaders.SwitchBoardLaughterInferenceDataset(
-        audio_path=audio_path, feature_fn=feature_fn, sr=sample_rate)
+    # inference_dataset = data_loaders.SwitchBoardLaughterInferenceDataset(
+    #     audio_path=audio_path, feature_fn=feature_fn, sr=sample_rate)
 
-    collate_fn = partial(audio_utils.pad_sequences_with_labels,
-                         expand_channel_dim=config['expand_channel_dim'])
+    # collate_fn = partial(audio_utils.pad_sequences_with_labels,
+    #                      expand_channel_dim=config['expand_channel_dim'])
 
-    inference_generator = torch.utils.data.DataLoader(
-        inference_dataset, num_workers=4, batch_size=8, shuffle=False, collate_fn=collate_fn)
+    # inference_generator = torch.utils.data.DataLoader(
+    #     inference_dataset, num_workers=4, batch_size=8, shuffle=False, collate_fn=collate_fn)
+
+    inference_generator = load_data.create_inference_dataloader(audio_path)
+    
+    
 
     # Make Predictions
 

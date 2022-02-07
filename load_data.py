@@ -1,10 +1,10 @@
 import torch
 from torch.utils.data import DataLoader
-from lhotse import CutSet, Fbank, FbankConfig, MonoCut, LilcomFilesWriter
+from lhotse import CutSet, Fbank, FbankConfig, MonoCut, LilcomFilesWriter, Recording
 from lhotse.dataset import SingleCutSampler, UnsupervisedDataset
 from lhotse.recipes import prepare_icsi
 from lhotse import SupervisionSegment, SupervisionSet, RecordingSet
-from lad import LadDataset
+from lad import LadDataset, InferenceDataset
 import pandas as pd
 import pickle
 import os
@@ -201,14 +201,20 @@ def compute_inference_features(split):
     cuts_with_feats.to_jsonl(os.path.join(cutset_dir, f'inference_{split}_cutset_with_feats.jsonl'))
 
 
-def create_inference_dataloader(split):
-    cuts = CutSet.from_jsonl(os.path.join(
-        cutset_dir, f'inference_{split}_cutset_with_feats.jsonl'))
+def create_inference_dataloader(audio_path):
+    single_rec = Recording.from_file(audio_path)
+    # TODO: Is there a better way then creating a RecordingSet and CutSet with len=1
+    cuts = CutSet.from_manifests(RecordingSet.from_recordings([single_rec]))
+    # Cut that contains the whole audiofile
+    cut_all = cuts[0] 
+
+    f2 = Fbank(FbankConfig(num_filters=128, frame_shift=0.02275)) 
+    feats_all = cut_all.compute_features(f2)
+
     
     # Construct a Pytorch Dataset class for inference using the  
-    dataset = UnsupervisedDataset()
-    sampler = SingleCutSampler(cuts, max_cuts=32)
-    dataloader = DataLoader(dataset, sampler=sampler, batch_size=None)
+    dataset = InferenceDataset(feats_all) 
+    dataloader = DataLoader(dataset, batch_size=32)
     return dataloader
     
     
