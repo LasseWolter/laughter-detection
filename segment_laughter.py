@@ -102,8 +102,11 @@ def load_and_pred(audio_path):
     # Make Predictions
 
     probs = []
-    for model_inputs, _ in tqdm(inference_generator):
-        x = torch.from_numpy(model_inputs).float().to(device)
+    for model_inputs in tqdm(inference_generator):
+        # x = torch.from_numpy(model_inputs).float().to(device)
+        # Model inputs from new inference generator are tensors already
+        model_inputs = model_inputs[:,None,:,:] # add additional dimension
+        x = model_inputs.float().to(device)
         preds = model(x).cpu().detach().numpy().squeeze()
         if len(preds.shape) == 0:
             preds = [float(preds)]
@@ -196,3 +199,5 @@ def calc_real_time_factor(audio_path, iterations):
     av_real_time_factor = av_time/audio_length
     print(
         f"Average Realtime Factor over {iterations} iterations: {av_real_time_factor:.2f}")
+
+load_and_pred(audio_path)

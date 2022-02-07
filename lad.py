@@ -70,13 +70,14 @@ class InferenceDataset(torch.utils.data.Dataset):
     The PyTorch Dataset for the inference of laughter detection.
     """ 
 
-    def __init__(self, feats) -> None:
+    def __init__(self, feats, n_frames=44) -> None:
         super().__init__()
         self.feats = feats # The feature representation for the whole meeting
+        self.n_frames = n_frames
 
     def __len__(self):
         return len(self.feats)
 
-    def __getitem__(self, index) -> numpy.ndarray: 
-        return self.feats[index,:]
+    def __getitem__(self, index):
+        return self.feats[index:index+self.n_frames]
 
