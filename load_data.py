@@ -1,6 +1,7 @@
+import torch
 from torch.utils.data import DataLoader
 from lhotse import CutSet, Fbank, FbankConfig, MonoCut, LilcomFilesWriter
-from lhotse.dataset import VadDataset, SingleCutSampler
+from lhotse.dataset import SingleCutSampler, UnsupervisedDataset
 from lhotse.recipes import prepare_icsi
 from lhotse import SupervisionSegment, SupervisionSet, RecordingSet
 from lad import LadDataset
@@ -15,36 +16,36 @@ FORCE_FEATURE_RECOMPUTE = False  # allows overwriting already computed features
 
 SPLITS = ['train', 'dev', 'test']
 
+if DEBUG:
+    data_dir = 'data/icsi/'
+    # lhotse_dir: Directory which will contain manifest and cutset dumps from lhotse
+    lhotse_dir = os.path.join(data_dir, 'test')
+    audio_dir = os.path.join(data_dir, 'test_speech/')
+    transcripts_dir = os.path.join(data_dir, 'test_transcripts')
+    manifest_dir = os.path.join(lhotse_dir, 'manifests')
+    feats_path = os.path.join(lhotse_dir, 'feats')
+    cuts_file = os.path.join(lhotse_dir, 'debug_cuts.jsonl')
+    cutset_dir = os.path.join(lhotse_dir, 'cutsets')
+    print('IN DEBUG MODE - loading small amount of data')
+else:
+    data_dir = 'data/icsi/'
+    # lhotse_dir: Directory which will contain manifest and cutset dumps from lhotse
+    lhotse_dir = os.path.join(data_dir, 'lhotse')
+    audio_dir = os.path.join(data_dir, 'speech/')
+    # due to the way the icsi-recipe works, we just pass the base data dir
+    # which contains the transcript dir which is required by the icsi-recipe
+    transcripts_dir = data_dir
+    manifest_dir = os.path.join(lhotse_dir, 'manifests')
+    feats_path = os.path.join(lhotse_dir, 'feats')
+    cuts_file = os.path.join(lhotse_dir, 'cuts_with_feats.jsonl')
+    cutset_dir = os.path.join(lhotse_dir, 'cutsets')
 
-def compute_features():
-    if DEBUG:
-        data_dir = 'data/icsi/'
-        # lhotse_dir: Directory which will contain manifest and cutset dumps from lhotse
-        lhotse_dir = os.path.join(data_dir, 'test')
-        audio_dir = os.path.join(data_dir, 'test_speech/')
-        transcripts_dir = os.path.join(data_dir, 'test_transcripts')
-        manifest_dir = os.path.join(lhotse_dir, 'manifests')
-        feats_path = os.path.join(lhotse_dir, 'feats')
-        cuts_file = os.path.join(lhotse_dir, 'debug_cuts.jsonl')
-        cutset_dir = os.path.join(lhotse_dir, 'cutsets')
-        print('IN DEBUG MODE - loading small amount of data')
-    else:
-        data_dir = 'data/icsi/'
-        # lhotse_dir: Directory which will contain manifest and cutset dumps from lhotse
-        lhotse_dir = os.path.join(data_dir, 'lhotse')
-        audio_dir = os.path.join(data_dir, 'speech/')
-        # due to the way the icsi-recipe works, we just pass the base data dir
-        # which contains the transcript dir which is required by the icsi-recipe
-        transcripts_dir = data_dir
-        manifest_dir = os.path.join(lhotse_dir, 'manifests')
-        feats_path = os.path.join(lhotse_dir, 'feats')
-        cuts_file = os.path.join(lhotse_dir, 'cuts_with_feats.jsonl')
-        cutset_dir = os.path.join(lhotse_dir, 'cutsets')
 
-    # Create directory for storing lhotse cutsets
-    # Manifest dir is automatically created by lhotse's icsi recipe if it doesn't exist
-    subprocess.run(['mkdir', '-p', cutset_dir])
-
+def create_manifest(audio_dir, transcripts_dir, manifest_dir):
+    '''
+    Create or load lhotse manifest for icsi dataset.  
+    If it exists on disk, load it. Otherwise create it using the icsi_recipe
+    '''
     # Prepare data manifests from a raw corpus distribution.
     # The RecordingSet describes the metadata about audio recordings;
     # the sampling rate, number of channels, duration, etc.
@@ -63,6 +64,16 @@ def compute_features():
     else:
         icsi = prepare_icsi(
             audio_dir=audio_dir, transcripts_dir=transcripts_dir, output_dir=manifest_dir)
+
+    return icsi
+
+
+def compute_features():
+    # Create directory for storing lhotse cutsets
+    # Manifest dir is automatically created by lhotse's icsi recipe if it doesn't exist
+    subprocess.run(['mkdir', '-p', cutset_dir])
+
+    icsi = create_manifest(audio_dir, transcripts_dir, manifest_dir)
 
     # Load the channel to id mapping from disk
     # If this changed at some point (which it shouldn't) this file would have to
@@ -145,17 +156,64 @@ def create_dataloader(cutset_dir, split):
         - split needs to be one of 'train', 'dev' and 'test'
         - cutset location is the directory in which the lhotse-CutSet with all the information about cuts and their features is stored
     '''
-    if split not in ['train','dev','test']:
-        raise ValueError(f"Unexpected value for split. Needs to be one of 'train, dev, test'. Found {split}")
+    if split not in ['train', 'dev', 'test']:
+        raise ValueError(
+            f"Unexpected value for split. Needs to be one of 'train, dev, test'. Found {split}")
 
     # Load cutset for split
-    cuts = CutSet.from_jsonl(os.path.join(cutset_dir, f'{split}_cutset_with_feats.jsonl'))
+    cuts = CutSet.from_jsonl(os.path.join(
+        cutset_dir, f'{split}_cutset_with_feats.jsonl'))
 
     # Construct a Pytorch Dataset class for Laugh Activity Detection task:
     dataset = LadDataset()
     sampler = SingleCutSampler(cuts, max_cuts=32)
     dataloader = DataLoader(dataset, sampler=sampler, batch_size=None)
     return dataloader
+
+
+def compute_inference_features(split):
+    icsi = create_manifest(audio_dir, transcripts_dir, manifest_dir)
+
+    # we used a feature representation of shape (44,128) which means that each frame 
+    # was 1000ms/44 = ~23ms seconds long -> this is the length used for inference 0.023
+    cuts = CutSet.from_manifests(
+        recordings=icsi[split]['recordings'],
+        supervisions=icsi[split]['supervisions']
+    ).cut_into_windows(duration=0.023)
+
+    cuts.to_jsonl(os.path.join(cutset_dir, f'inference_{split}_cutset.jsonl'))
+
+    f2 = Fbank(FbankConfig(num_filters=128, frame_shift=0.02275)) 
+    dev_feats_path = os.path.join(feats_path, 'dev')
+
+    # To make num_jobs > 1 work
+    # See this issue on github: https://github.com/lhotse-speech/lhotse/issues/559
+    torch.set_num_threads(1)
+
+    cuts_with_feats = cuts.compute_and_store_features(
+        extractor= f2,
+        storage_path= dev_feats_path,
+        num_jobs=8,
+    )
+
+    cuts_with_feats.to_jsonl(os.path.join(cutset_dir, f'inference_{split}_cutset_with_feats.jsonl'))
+
+
+def create_inference_dataloader(split):
+    cuts = CutSet.from_jsonl(os.path.join(
+        cutset_dir, f'inference_{split}_cutset_with_feats.jsonl'))
+    
+    # Construct a Pytorch Dataset class for inference using the  
+    dataset = UnsupervisedDataset()
+    sampler = SingleCutSampler(cuts, max_cuts=32)
+    dataloader = DataLoader(dataset, sampler=sampler, batch_size=None)
+    return dataloader
+    
+    
+    
+
+
+
 
 
 if __name__ == '__main__':
