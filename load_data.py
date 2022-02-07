@@ -185,6 +185,7 @@ def compute_inference_features(split):
 
     f2 = Fbank(FbankConfig(num_filters=128, frame_shift=0.02275)) 
     dev_feats_path = os.path.join(feats_path, 'dev')
+    subprocess.run(['mkdir', '-p', dev_feats_path])
 
     # To make num_jobs > 1 work
     # See this issue on github: https://github.com/lhotse-speech/lhotse/issues/559
@@ -194,6 +195,7 @@ def compute_inference_features(split):
         extractor= f2,
         storage_path= dev_feats_path,
         num_jobs=8,
+        storage_type=LilcomFilesWriter
     )
 
     cuts_with_feats.to_jsonl(os.path.join(cutset_dir, f'inference_{split}_cutset_with_feats.jsonl'))
@@ -217,4 +219,4 @@ def create_inference_dataloader(split):
 
 
 if __name__ == '__main__':
-    compute_features()
+    compute_inference_features('dev')
