@@ -1,0 +1,10 @@
+python train_lhotse.py --config resnet_base --checkpoint_dir /disk/scratch/s1660656/icsi/checkpoints --data_root /disk/scratch/s1660656/icsi/ --data_dfs_dir data_dfs
+python train_lhotse.py --config resnet_base --checkpoint_dir /disk/scratch/s1660656/icsi/checkpoints --data_root /disk/scratch/s1660656/icsi/ --data_dfs_dir data_dfs
+python train_lhotse.py --config resnet_base --checkpoint_dir /disk/scratch/s1660656/icsi/checkpoints --data_root /disk/scratch/s1660656/icsi/ --data_dfs_dir data_dfs
+python train_lhotse.py --config resnet_base --checkpoint_dir /disk/scratch/s1660656/icsi/checkpoints --data_root /disk/scratch/s1660656/icsi/ --data_dfs_dir data_dfs
+python train_lhotse.py --config resnet_base --checkpoint_dir /disk/scratch/s1660656/icsi/checkpoints --data_root /disk/scratch/s1660656/icsi/ --data_dfs_dir data_dfs
+python train_lhotse.py --config resnet_base --checkpoint_dir /disk/scratch/s1660656/icsi/checkpoints --data_root /disk/scratch/s1660656/icsi/ --data_dfs_dir data_dfs
+python train_lhotse.py --config resnet_base --checkpoint_dir /disk/scratch/s1660656/icsi/checkpoints --data_root /disk/scratch/s1660656/icsi/ --data_dfs_dir data_dfs
+python train_lhotse.py --config resnet_base --checkpoint_dir /disk/scratch/s1660656/icsi/checkpoints --data_root /disk/scratch/s1660656/icsi/ --data_dfs_dir data_dfs
+python train_lhotse.py --config resnet_base --checkpoint_dir /disk/scratch/s1660656/icsi/checkpoints --data_root /disk/scratch/s1660656/icsi/ --data_dfs_dir data_dfs
+python train_lhotse.py --config resnet_base --checkpoint_dir /disk/scratch/s1660656/icsi/checkpoints --data_root /disk/scratch/s1660656/icsi/ --data_dfs_dir data_dfs
