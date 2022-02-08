@@ -17,7 +17,7 @@ from lhotse.cut import CutSet
 from lhotse.dataset.input_strategies import BatchIO, PrecomputedFeatures
 from lhotse.utils import ifnone
 import torch
-import numpy
+import numpy as np
 
 class LadDataset(torch.utils.data.Dataset):
     """
@@ -79,5 +79,13 @@ class InferenceDataset(torch.utils.data.Dataset):
         return len(self.feats)
 
     def __getitem__(self, index):
-        return self.feats[index:index+self.n_frames]
+        ret = self.feats[index:index+self.n_frames]
+        if(index > self.__len__() - 40):
+            a = 0
+        if ret.shape[0] != 44:
+            pad_amount = 44 - ret.shape[0]
+            # zero pad first axis only on the right
+            ret = np.pad(ret, ((0,pad_amount), (0,0)))
+        b= 5
+        return ret 
 
