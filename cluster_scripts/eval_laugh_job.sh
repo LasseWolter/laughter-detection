@@ -102,7 +102,7 @@ repo_home=/home/${USER}/git/laughter-detection
 src_path=${repo_home}/data/icsi/speech/dev
 
 # input data directory path on the scratch disk of the node
-dest_path=${SCRATCH_HOME}/icsi/data/input
+dest_path=${SCRATCH_HOME}/icsi/data/speech/dev
 mkdir -p ${dest_path}  # make it if required
 
 # Important notes about rsync:
