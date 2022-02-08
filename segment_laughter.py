@@ -29,6 +29,9 @@ import dataset_utils
 
 sample_rate = 8000
 
+thresholds = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]
+min_lengths = [0.2]
+
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--model_path', type=str,
@@ -120,25 +123,38 @@ def load_and_pred(audio_path):
     fps = len(probs)/float(file_length)
 
     probs = laugh_segmenter.lowpass(probs)
-    instances = laugh_segmenter.get_laughter_instances(
-        probs, threshold=threshold, min_length=float(args.min_length), fps=fps)
+
+    # Get a list of instance for each setting passed in  
+    instance_dict = laugh_segmenter.get_laughter_instances(
+        probs, thresholds=thresholds, min_lengths=min_lengths, fps=fps)
 
     time_taken = time.time() - start_time  # stop measuring time
     print(f'Completed in: {time_taken:.2f}s')
-    print()
-    print("found %d laughs." % (len(instances)))
 
+    for setting, instances in instance_dict.items():
+        print(f"Found {len(instances)} laughs for threshold {setting[0]} and min_length {setting[1]}.") 
+        instance_output_dir = os.path.join(output_dir, f't_{setting[0]}', f'l_{setting[1]}')
+        save_instances(instances, instance_output_dir, save_to_audio_files, save_to_textgrid)
+
+    return time_taken
+
+def save_instances(instances, output_dir, save_to_audio_files, save_to_textgrid):
+    '''
+    Saves given instances to disk in a form that is specified by the passed parameters. 
+    Possible forms:
+        1. as audio file
+        2. as textgrid file
+    '''
     if len(instances) > 0:
-        full_res_y, full_res_sr = librosa.load(audio_path, sr=44100)
-        wav_paths = []
-        maxv = np.iinfo(np.int16).max
-
+        os.system(f"mkdir -p {output_dir}")
         if save_to_audio_files:
+            full_res_y, full_res_sr = librosa.load(audio_path, sr=44100)
+            wav_paths = []
+            maxv = np.iinfo(np.int16).max
             if output_dir is None:
                 raise Exception(
                     "Need to specify an output directory to save audio files")
             else:
-                os.system(f"mkdir -p {output_dir}")
                 for index, instance in enumerate(instances):
                     laughs = laugh_segmenter.cut_laughter_segments(
                         [instance], full_res_y, full_res_sr)
@@ -160,9 +176,6 @@ def load_and_pred(audio_path):
 
             print('Saved laughter segments in {}'.format(
                 os.path.join(output_dir, fname + '_laughter.TextGrid')))
-
-    return time_taken
-
 
 def i_pred():
     """
