@@ -605,7 +605,13 @@ train_loader = load_data.create_dataloader(cutset_dir, 'train')
 # time_dataloading(1, lhotse_loader, is_lhotse=True)
 
 
+start_time = time.time()
 run_training_loop(n_epochs=100, model=model, device=device,
                   iterator=train_loader, checkpoint_dir=checkpoint_dir, optimizer=optimizer,
                   log_frequency=log_frequency, val_iterator=dev_loader,
                   verbose=True)
+
+train_time = time.time() - start_time
+time_in_m = train_time/60
+time_in_h = train_time/3600
+print(f"Training time[in three different formats s/min/h]:\n{train_time:.2f}s\n{time_in_m}m\n{time_in_h}h")
