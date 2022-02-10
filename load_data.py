@@ -133,6 +133,8 @@ def compute_features():
         # 0.2275 = 16 000 / 364 -> [frame_rate / hop_length]
         f2 = Fbank(FbankConfig(num_filters=128, frame_shift=0.02275))
 
+        torch.set_num_threads(1)
+
         if(os.path.isfile(cuts_file) and not FORCE_FEATURE_RECOMPUTE):
             print("LOADING FEATURES FROM DISK - NOT RECOMPUTING")
             cuts = CutSet.from_jsonl(f'{split}_cutset_with_feats.jsonl')
@@ -140,7 +142,7 @@ def compute_features():
             cuts = cutset.compute_and_store_features(
                 extractor=f2,
                 storage_path=feats_path,
-                num_jobs=1,
+                num_jobs=8,
                 storage_type=LilcomFilesWriter
             )
             # Shuffle cutset for better training. In the data_dfs the rows aren't shuffled.
@@ -225,4 +227,4 @@ def create_inference_dataloader(audio_path):
 
 
 if __name__ == '__main__':
-    compute_inference_features('dev')
+    compute_features()
