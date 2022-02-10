@@ -5,10 +5,9 @@
 
 # python train.py --config=resnet_with_augmentation --batch_size=32 --checkpoint_dir=./checkpoints/resnet_aug_audioset_tst --train_on_noisy_audioset=True
 
-
+import json
 import load_data
 from functools import partial
-import time
 import configs
 import models
 from sklearn.utils import shuffle
@@ -32,14 +31,45 @@ from lhotse import CutSet
 from lhotse.dataset import VadDataset, SingleCutSampler
 
 sys.path.append('./utils/')
-import torch_utils
-import dataset_utils
-import audio_utils
 import data_loaders
+import audio_utils
+import dataset_utils
+import torch_utils
 
 warnings.filterwarnings('ignore', category=UserWarning)
 
-
+# Stores metrics during training (on train-set and small val-batches) in the following format
+METRICS_DICT = {"train": {}, "val": {}}
+'''
+{
+    "train":
+    {
+        num_batches_processed: {
+            "precision": prec
+            "recall": recall
+            "accuracy": acc
+            "loss": loss
+        },
+        num_batches_processed: {
+            "precision": prec
+            "recall": recall
+            "accuracy": acc
+            "loss": loss
+        }
+    ...
+    },
+    "val":
+    {
+        num_batches_processed: {
+            "precision": prec
+            "recall": recall
+            "accuracy": acc
+            "loss": loss
+        },
+        ...
+    }
+}
+'''
 learning_rate = 0.01  # Learning rate.
 decay_rate = 0.9999  # Learning rate decay per minibatch.
 min_learning_rate = 0.000001  # Minimum learning rate.
@@ -180,6 +210,8 @@ def run_epoch(model, mode, device, iterator, checkpoint_dir, optimizer=None, cli
         model.eval()
         val_losses = []
         val_accs = []
+        val_precs = []
+        val_recalls = []
 
         for j in range(val_batches_per_log):
             try:
@@ -188,12 +220,16 @@ def run_epoch(model, mode, device, iterator, checkpoint_dir, optimizer=None, cli
                 val_itr = iter(val_iterator)
                 val_batch = val_itr.next()
 
-            val_loss, val_acc = _eval_batch(model, device, val_batch)
+            val_loss, val_acc, val_prec, val_recall = _eval_batch(
+                model, device, val_batch)
+
+            val_precs.append(val_prec)
+            val_recalls.append(val_recall)
             val_losses.append(val_loss)
             val_accs.append(val_acc)
 
         model.train()
-        return val_itr, np.mean(val_losses), np.mean(val_accs)
+        return val_itr, np.mean(val_losses), np.mean(val_accs), np.mean(val_precs), np.mean(val_recalls)
 
     def _eval_batch(model, device, batch, batch_index=None, clip=None):
         if batch is None:
@@ -206,7 +242,7 @@ def run_epoch(model, mode, device, iterator, checkpoint_dir, optimizer=None, cli
             labs = batch['is_laugh']
 
             src = torch.from_numpy(np.array(segs)).float().to(device)
-            src = src[:,None,:,:] # add additional dimension
+            src = src[:, None, :, :]  # add additional dimension
 
             trg = torch.from_numpy(np.array(labs)).float().to(device)
             output = model(src).squeeze()
@@ -217,9 +253,20 @@ def run_epoch(model, mode, device, iterator, checkpoint_dir, optimizer=None, cli
             print(f'targets: {trg}')
             print(f'preds: {preds}')
             # sum(preds==trg).float()/len(preds)
+
+            # Calculate necessary numbers for prec and recall calculation
+            # '==' operator on tensors is applied element-wise
+            # '*' exploits the fact that True*True = 1
+            corr_pred_laughs = torch.sum((preds == trg) * (preds == 1)).float()
+            total_trg_laughs = torch.sum(trg == 1).float()
+            total_pred_laughs = torch.sum(preds == 1).float()
+
+            prec = corr_pred_laughs/total_pred_laughs
+            recall = corr_pred_laughs/total_trg_laughs
+
             acc = torch.sum(preds == trg).float()/len(trg)
 
-            return bce_loss.item(), acc.item()
+            return bce_loss.item(), acc.item(), prec.item(), recall.item()
 
     def _train_batch(model, device, batch, batch_index=None, clip=None):
 
@@ -232,7 +279,7 @@ def run_epoch(model, mode, device, iterator, checkpoint_dir, optimizer=None, cli
         labs = batch['is_laugh']
 
         src = torch.from_numpy(np.array(segs)).float().to(device)
-        src = src[:,None,:,:] # add additional dimension
+        src = src[:, None, :, :]  # add additional dimension
         trg = torch.from_numpy(np.array(labs)).float().to(device)
 
         # optimizer.zero_grad()
@@ -243,6 +290,16 @@ def run_epoch(model, mode, device, iterator, checkpoint_dir, optimizer=None, cli
 
         preds = torch.round(output)
         acc = torch.sum(preds == trg).float()/len(trg)
+
+        # Calculate necessary numbers for prec and recall calculation
+        # '==' operator on tensors is applied element-wise
+        # '*' exploits the fact that True*True = 1
+        corr_pred_laughs = torch.sum((preds == trg) * (preds == 1)).float()
+        total_trg_laughs = torch.sum(trg == 1).float()
+        total_pred_laughs = torch.sum(preds == 1).float()
+
+        prec = corr_pred_laughs/total_pred_laughs
+        recall = corr_pred_laughs/total_trg_laughs
 
         bce_loss = criterion(output, trg)
 
@@ -256,10 +313,10 @@ def run_epoch(model, mode, device, iterator, checkpoint_dir, optimizer=None, cli
             optimizer.step()
             model.zero_grad()
 
-        return bce_loss.item(), acc.item()
+        return bce_loss.item(), acc.item(), prec.item(), recall.item()
 
     # TODO: possibly take out this case because we just want to support passing an iterator anyway?
-    if False: #not (bool(iterator) ^ bool(batches)):
+    if False:  # not (bool(iterator) ^ bool(batches)):
         raise Exception("Must pass either `iterator` or batches")
 
     if mode.lower() not in ['train', 'eval']:
@@ -268,7 +325,7 @@ def run_epoch(model, mode, device, iterator, checkpoint_dir, optimizer=None, cli
     if mode.lower() == 'train' and validate_online:
         #val_batches_per_epoch = torch_utils.num_batches_per_epoch(val_iterator)
         #val_batches_per_log = int(np.round(val_batches_per_epoch))
-        val_batches_per_log = 1 #TODO hardcoded for now
+        val_batches_per_log = 10  # TODO hardcoded for now
         val_itr = iter(val_iterator)
 
     if mode == 'train':
@@ -288,6 +345,8 @@ def run_epoch(model, mode, device, iterator, checkpoint_dir, optimizer=None, cli
         # batches_per_epoch = torch_utils.num_batches_per_epoch(iterator)
         batch_losses = []
         batch_accs = []
+        batch_precs = []
+        batch_recalls = []
         # batch_consistency_losses = []
         # batch_ent_losses = []
         num_batches = 0
@@ -297,22 +356,41 @@ def run_epoch(model, mode, device, iterator, checkpoint_dir, optimizer=None, cli
                 decay_rate**(float(model.global_step))+min_learning_rate
             optimizer.lr = lr
 
-            batch_loss, batch_acc = _run_batch(model, device, batch,
-                                               batch_index=i, clip=clip)
+            batch_loss, batch_acc, batch_prec, batch_recall = _run_batch(model, device, batch,
+                                                                         batch_index=i, clip=clip)
 
             batch_losses.append(batch_loss)
             batch_accs.append(batch_acc)
 
             if log_frequency is not None and (model.global_step + 1) % log_frequency == 0:
-                val_itr, val_loss_at_step, val_acc_at_step = _eval_for_logging(model, device,
-                                                                               val_itr, val_iterator, val_batches_per_log)
+                # TODO: possibly remove val_itr from return values?
+                val_itr, val_loss_at_step, val_acc_at_step, val_prec_at_step, val_recall_at_step = _eval_for_logging(model, device,
+                                                                                                                     val_itr, val_iterator, val_batches_per_log)
 
                 is_best = (val_loss_at_step < model.best_val_loss)
                 if is_best:
                     model.best_val_loss = val_loss_at_step
 
+                # Save metrics for the validation above
+                METRICS_DICT['val'][model.global_step] = {
+                    "precision": val_acc_at_step,
+                    "recall": val_prec_at_step,
+                    "accuracy": val_recall_at_step,
+                    "loss": val_loss_at_step
+                }
+
                 train_loss_at_step = np.mean(batch_losses)
                 train_acc_at_step = np.mean(batch_accs)
+                train_prec_at_step = np.mean(batch_precs)
+                train_recall_at_step = np.mean(batch_recalls)
+
+                # Save metrics on training set up to now
+                METRICS_DICT['train'][model.global_step] = {
+                    "precision": val_acc_at_step,
+                    "recall": val_prec_at_step,
+                    "accuracy": val_recall_at_step,
+                    "loss": val_loss_at_step
+                }
 
                 if verbose:
                     print("\nLogging at step: ", model.global_step)
@@ -340,10 +418,10 @@ def run_epoch(model, mode, device, iterator, checkpoint_dir, optimizer=None, cli
 
             epoch_loss += batch_loss
             model.global_step += 1
-            num_batches =+1
+            num_batches = +1
 
         model.epoch += 1
-        return epoch_loss / num_batches 
+        return epoch_loss / num_batches
 
 
 print("Initializing model...")
@@ -425,7 +503,8 @@ def get_audios_from_text_data(data_file_or_lines, h, sr=sample_rate):
     offsets = list(df.offset)
     durations = list(df.duration)
     for i in tqdm(range(len(audio_paths))):
-        aud = h[audio_paths[i]][int(offsets[i]*sr)                                :int((offsets[i]+durations[i])*sr)]
+        aud = h[audio_paths[i]][int(offsets[i]*sr)
+                                    :int((offsets[i]+durations[i])*sr)]
         audios.append(aud)
     return audios
 
@@ -605,13 +684,26 @@ train_loader = load_data.create_dataloader(cutset_dir, 'train')
 # time_dataloading(1, lhotse_loader, is_lhotse=True)
 
 
+num_epochs = 1
 start_time = time.time()
-run_training_loop(n_epochs=100, model=model, device=device,
+run_training_loop(n_epochs=num_epochs, model=model, device=device,
                   iterator=train_loader, checkpoint_dir=checkpoint_dir, optimizer=optimizer,
                   log_frequency=log_frequency, val_iterator=dev_loader,
                   verbose=True)
 
-train_time = time.time() - start_time
-time_in_m = train_time/60
-time_in_h = train_time/3600
-print(f"Training time[in three different formats s/min/h]:\n{train_time:.2f}s\n{time_in_m}m\n{time_in_h}h")
+tot_train_time = time.time() - start_time
+time_in_m = tot_train_time/60
+time_in_h = tot_train_time/3600
+
+time_per_epoch = tot_train_time/num_epochs
+epoch_time_in_m = time_per_epoch/60
+epoch_time_in_h = time_per_epoch/3600
+print("Ran {num_epochs} epochs.")
+print(
+    f"Total training time[in three different formats s/min/h]:\n{tot_train_time:.2f}s\n{time_in_m:.2f}m\n{time_in_h:.2f}h")
+print('---------------')
+print(
+    f"Time per epoch time[in three different formats s/min/h]:\n{time_per_epoch:.2f}s\n{epoch_time_in_m:.2f}m\n{epoch_time_in_h:.2f}h")
+
+with open('metrics.json', 'w') as f:
+    json.dump(METRICS_DICT, f)
