@@ -172,7 +172,7 @@ def save_instances(instances, output_dir, save_to_audio_files, save_to_textgrid)
             tg.add_tier(laughs_tier)
             fname = os.path.splitext(os.path.basename(audio_path))[0]
             tgt.write_to_file(tg, os.path.join(
-                output_dir, fname + '_laughter.TextGrid'))
+                output_dir, fname + '.TextGrid'))
 
             print('Saved laughter segments in {}'.format(
                 os.path.join(output_dir, fname + '_laughter.TextGrid')))
