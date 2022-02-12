@@ -1,7 +1,19 @@
+'''
+REQUIREMENT: `chan_idx_map.pkl` file next to the data_frames in the dataframe folder
+
+This script creates feature representations for audio segments present in a given dataframe
+The dataframe must have the following columns: 
+['start', 'duration', 'sub_start', 'sub_duration', 'audio_path', 'label']
+with the following meaning  
+[region start, region duration, subsampled region start, subsampled region duration, audio path, label]
+
+EXAMPLE USAGE: 
+python load_data.py --audio_dir data/icsi/speech/ --transcript_dir data/icsi/ --data_df_dir data/icsi/data_dfs/ --output_dir test_output --debug True
+'''
 import torch
 from torch.utils.data import DataLoader
-from lhotse import CutSet, Fbank, FbankConfig, MonoCut, LilcomFilesWriter, Recording
-from lhotse.dataset import SingleCutSampler, UnsupervisedDataset
+from lhotse import CutSet, Fbank, FbankConfig, MonoCut, Recording
+from lhotse.dataset import SingleCutSampler
 from lhotse.recipes import prepare_icsi
 from lhotse import SupervisionSegment, SupervisionSet, RecordingSet
 from lad import LadDataset, InferenceDataset
@@ -9,36 +21,61 @@ import pandas as pd
 import pickle
 import os
 import subprocess
+import argparse
 
-DEBUG = False
-FORCE_MANIFEST_RELOAD = False  # allows overwriting already stored manifests
-FORCE_FEATURE_RECOMPUTE = False  # allows overwriting already computed features
+parser = argparse.ArgumentParser()
+
+######## REQUIRED ARGS #########
+# Directory containing the audio_files from ICSI corpus
+parser.add_argument('--audio_dir', type=str, required=True)
+
+# Directory containing the ICSI transcripts 
+parser.add_argument('--transcript_dir', type=str, required=True)
+
+# Directory which contains the dataframes describing the audio segments we want to create 
+# features for
+parser.add_argument('--data_df_dir', type=str, required=True)
+
+# Directory which will contain the manifest,cutsets and features
+parser.add_argument('--output_dir', type=str, required=True)
+
+######## OPTIONAL ARGS #########
+# Set DEBUG variable to true, using dummy data instead of whole audio data
+# Will use the output folder set above an create a 'debug' folder inside it for the outputs
+parser.add_argument('--debug', type=bool, default=False)
+
+# Allows overwriting already stored manifests
+# E.g. when using different audio paths the manifest needs to be recreated 
+parser.add_argument('--force_manifest_reload', type=bool, default=False)
+
+# Set batch size. Overrides batch_size set in the config object
+parser.add_argument('--force_feature_recompute', type=bool, default=False)
+
+# Number of processes for parallel processing on cpu. 
+parser.add_argument('--num_jobs', type=int, default=8)
+
+args = parser.parse_args()
+
+DEBUG = args.debug 
+FORCE_MANIFEST_RELOAD = args.force_manifest_reload 
+FORCE_FEATURE_RECOMPUTE = args.force_feature_recompute # allows overwriting already computed features
 
 SPLITS = ['train', 'dev', 'test']
 
+# Initialise directories according to the passed arguments
 if DEBUG:
-    data_dir = 'data/icsi/'
-    # lhotse_dir: Directory which will contain manifest and cutset dumps from lhotse
-    lhotse_dir = os.path.join(data_dir, 'test')
-    audio_dir = os.path.join(data_dir, 'test_speech/')
-    transcripts_dir = os.path.join(data_dir, 'test_transcripts')
-    manifest_dir = os.path.join(lhotse_dir, 'manifests')
-    feats_path = os.path.join(lhotse_dir, 'feats')
-    cuts_file = os.path.join(lhotse_dir, 'debug_cuts.jsonl')
-    cutset_dir = os.path.join(lhotse_dir, 'cutsets')
+    # output_dir: Directory which will contain manifest, cutset dumps and features 
+    output_dir = os.path.join(args.output_dir, 'debug')
     print('IN DEBUG MODE - loading small amount of data')
 else:
-    data_dir = 'data/icsi/'
-    # lhotse_dir: Directory which will contain manifest and cutset dumps from lhotse
-    lhotse_dir = os.path.join(data_dir, 'lhotse')
-    audio_dir = os.path.join(data_dir, 'speech/')
-    # due to the way the icsi-recipe works, we just pass the base data dir
-    # which contains the transcript dir which is required by the icsi-recipe
-    transcripts_dir = data_dir
-    manifest_dir = os.path.join(lhotse_dir, 'manifests')
-    feats_path = os.path.join(lhotse_dir, 'feats')
-    cuts_file = os.path.join(lhotse_dir, 'cuts_with_feats.jsonl')
-    cutset_dir = os.path.join(lhotse_dir, 'cutsets')
+    output_dir = args.output_dir 
+
+data_df_dir = args.data_df_dir
+audio_dir = args.audio_dir
+transcripts_dir = args.transcript_dir 
+manifest_dir = os.path.join(output_dir, 'manifests')
+feats_dir = os.path.join(output_dir, 'feats')
+cutset_dir = os.path.join(output_dir, 'cutsets')
 
 
 def create_manifest(audio_dir, transcripts_dir, manifest_dir):
@@ -79,7 +116,7 @@ def compute_features():
     # If this changed at some point (which it shouldn't) this file would have to
     # be recreated
     # TODO: find a cleaner way to implement this
-    chan_map_file = open(os.path.join(data_dir, 'chan_idx_map.pkl'), 'rb')
+    chan_map_file = open(os.path.join(data_df_dir, 'chan_idx_map.pkl'), 'rb')
     chan_idx_map = pickle.load(chan_map_file)
 
     # Read data_dfs containing the samples for train,val,test split
@@ -87,11 +124,11 @@ def compute_features():
     if DEBUG:
         # Dummy data is in the train split
         dfs['train'] = pd.read_csv(os.path.join(
-            data_dir, 'data_dfs', f'dummy_df.csv'))
+            data_df_dir, f'dummy_df.csv'))
     else:
         for split in SPLITS:
             dfs[split] = pd.read_csv(os.path.join(
-                data_dir, 'data_dfs', f'{split}_df.csv'))
+                data_df_dir, f'{split}_df.csv'))
 
     # CutSet is the workhorse of Lhotse, allowing for flexible data manipulation.
     # We use the existing dataframe to create a corresponding cut for each row
@@ -135,21 +172,24 @@ def compute_features():
 
         torch.set_num_threads(1)
 
-        if(os.path.isfile(cuts_file) and not FORCE_FEATURE_RECOMPUTE):
+        # File in which the CutSet object (which contains feature metadata) was/will be stored
+        cuts_with_feats_file = os.path.join(
+                cutset_dir, f'{split}_cutset_with_feats.jsonl')
+
+        # If file already exist, load it from disk
+        if(os.path.isfile(cuts_with_feats_file) and not FORCE_FEATURE_RECOMPUTE):
             print("LOADING FEATURES FROM DISK - NOT RECOMPUTING")
             cuts = CutSet.from_jsonl(f'{split}_cutset_with_feats.jsonl')
         else:
             cuts = cutset.compute_and_store_features(
                 extractor=f2,
-                storage_path=feats_path,
-                num_jobs=8,
-                storage_type=LilcomFilesWriter
+                storage_path=feats_dir,
+                num_jobs=args.num_jobs
             )
             # Shuffle cutset for better training. In the data_dfs the rows aren't shuffled.
             # At the top are all speech rows and the bottom all laugh rows
             cuts = cuts.shuffle()
-            cuts.to_jsonl(os.path.join(
-                cutset_dir, f'{split}_cutset_with_feats.jsonl'))
+            cuts.to_jsonl(cuts_with_feats_file)
 
 
 def create_dataloader(cutset_dir, split):
@@ -173,57 +213,20 @@ def create_dataloader(cutset_dir, split):
     return dataloader
 
 
-def compute_inference_features(split):
-    icsi = create_manifest(audio_dir, transcripts_dir, manifest_dir)
-
-    # we used a feature representation of shape (44,128) which means that each frame 
-    # was 1000ms/44 = ~23ms seconds long -> this is the length used for inference 0.023
-    cuts = CutSet.from_manifests(
-        recordings=icsi[split]['recordings'],
-        supervisions=icsi[split]['supervisions']
-    ).cut_into_windows(duration=0.023)
-
-    cuts.to_jsonl(os.path.join(cutset_dir, f'inference_{split}_cutset.jsonl'))
-
-    f2 = Fbank(FbankConfig(num_filters=128, frame_shift=0.02275)) 
-    dev_feats_path = os.path.join(feats_path, 'dev')
-    subprocess.run(['mkdir', '-p', dev_feats_path])
-
-    # To make num_jobs > 1 work
-    # See this issue on github: https://github.com/lhotse-speech/lhotse/issues/559
-    torch.set_num_threads(1)
-
-    cuts_with_feats = cuts.compute_and_store_features(
-        extractor= f2,
-        storage_path= dev_feats_path,
-        num_jobs=8,
-        storage_type=LilcomFilesWriter
-    )
-
-    cuts_with_feats.to_jsonl(os.path.join(cutset_dir, f'inference_{split}_cutset_with_feats.jsonl'))
-
-
 def create_inference_dataloader(audio_path):
     single_rec = Recording.from_file(audio_path)
     # TODO: Is there a better way then creating a RecordingSet and CutSet with len=1
     cuts = CutSet.from_manifests(RecordingSet.from_recordings([single_rec]))
     # Cut that contains the whole audiofile
-    cut_all = cuts[0] 
+    cut_all = cuts[0]
 
-    f2 = Fbank(FbankConfig(num_filters=128, frame_shift=0.02275)) 
+    f2 = Fbank(FbankConfig(num_filters=128, frame_shift=0.02275))
     feats_all = cut_all.compute_features(f2)
 
-    
-    # Construct a Pytorch Dataset class for inference using the  
-    dataset = InferenceDataset(feats_all) 
+    # Construct a Pytorch Dataset class for inference using the
+    dataset = InferenceDataset(feats_all)
     dataloader = DataLoader(dataset, batch_size=32)
     return dataloader
-    
-    
-    
-
-
-
 
 
 if __name__ == '__main__':
