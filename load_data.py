@@ -12,7 +12,8 @@ python load_data.py --audio_dir data/icsi/speech/ --transcript_dir data/icsi/ --
 '''
 import torch
 from torch.utils.data import DataLoader
-from lhotse import CutSet, Fbank, FbankConfig, MonoCut, Recording
+from lhotse import CutSet, Fbank, FbankConfig, MonoCut, Recording, KaldifeatFbank, KaldifeatFbankConfig
+from lhotse.features.kaldifeat import KaldifeatMelOptions
 from lhotse.dataset import SingleCutSampler
 from lhotse.recipes import prepare_icsi
 from lhotse import SupervisionSegment, SupervisionSet, RecordingSet
@@ -169,6 +170,7 @@ def compute_features():
         # Choose frame_shift value to match the hop_length of Gillick et al
         # 0.2275 = 16 000 / 364 -> [frame_rate / hop_length]
         f2 = Fbank(FbankConfig(num_filters=128, frame_shift=0.02275))
+        f_kaldi = KaldifeatFbank(KaldifeatFbankConfig(mel_opts=KaldifeatMelOptions(num_bins=128)))
 
         torch.set_num_threads(1)
 
@@ -181,8 +183,8 @@ def compute_features():
             print("LOADING FEATURES FROM DISK - NOT RECOMPUTING")
             cuts = CutSet.from_jsonl(f'{split}_cutset_with_feats.jsonl')
         else:
-            cuts = cutset.compute_and_store_features(
-                extractor=f2,
+            cuts = cutset.compute_and_store_features_batch(
+                extractor=f_kaldi,
                 storage_path=feats_dir,
                 num_jobs=args.num_jobs
             )
