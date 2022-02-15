@@ -29,6 +29,7 @@ import warnings
 from torch.utils.data import DataLoader
 from lhotse import CutSet
 from lhotse.dataset import VadDataset, SingleCutSampler
+from dataclasses import dataclass
 
 sys.path.append('./utils/')
 import data_loaders
@@ -38,36 +39,33 @@ import torch_utils
 
 warnings.filterwarnings('ignore', category=UserWarning)
 
+@dataclass
+class MetricEntry():
+    precision: float
+    recall: float
+    accuracy: float
+    loss: float
+
+    def to_list(self): 
+        '''
+        Returns fields as list in the following order 
+        [precision, recall , accuracy, loss]
+        '''
+        return [self.precision, self.recall, self.accuracy, self.loss]
+    
 # Stores metrics during training (on train-set and small val-batches) in the following format
-METRICS_DICT = {"train": {}, "val": {}}
+METRICS_DICT = {}
 '''
 {
-    "train":
-    {
-        num_batches_processed: {
-            "precision": prec
-            "recall": recall
-            "accuracy": acc
-            "loss": loss
-        },
-        num_batches_processed: {
-            "precision": prec
-            "recall": recall
-            "accuracy": acc
-            "loss": loss
-        }
+    num_batches_processed: {
+        "train": MetricsEntry
+        "val": MetricsEntry
+    }, 
+    num_batches_processed: {
+        "train": MetricsEntry
+        "val": MetricsEntry
+    }, 
     ...
-    },
-    "val":
-    {
-        num_batches_processed: {
-            "precision": prec
-            "recall": recall
-            "accuracy": acc
-            "loss": loss
-        },
-        ...
-    }
 }
 '''
 learning_rate = 0.01  # Learning rate.
@@ -142,6 +140,7 @@ dropout_rate = float(args.dropout_rate)
 supervised_augment = config['supervised_augment']
 supervised_spec_augment = config['supervised_spec_augment']
 gradient_accumulation_steps = int(args.gradient_accumulation_steps)
+metrics_file = os.path.join(checkpoint_dir, 'metrics.csv')
 
 if args.include_words is not None:
     include_words = True
@@ -371,13 +370,15 @@ def run_epoch(model, mode, device, iterator, checkpoint_dir, optimizer=None, cli
                 if is_best:
                     model.best_val_loss = val_loss_at_step
 
+                # Init metrics entry for this batch_number (i.e. global step)
+                METRICS_DICT[model.global_step] = {}
                 # Save metrics for the validation above
-                METRICS_DICT['val'][model.global_step] = {
-                    "precision": val_acc_at_step,
-                    "recall": val_prec_at_step,
-                    "accuracy": val_recall_at_step,
-                    "loss": val_loss_at_step
-                }
+                METRICS_DICT[model.global_step]['val']= MetricEntry(
+                    precision= val_acc_at_step,
+                    recall= val_prec_at_step,
+                    accuracy= val_recall_at_step,
+                    loss= val_loss_at_step
+                )
 
                 train_loss_at_step = np.mean(batch_losses)
                 train_acc_at_step = np.mean(batch_accs)
@@ -385,12 +386,12 @@ def run_epoch(model, mode, device, iterator, checkpoint_dir, optimizer=None, cli
                 train_recall_at_step = np.mean(batch_recalls)
 
                 # Save metrics on training set up to now
-                METRICS_DICT['train'][model.global_step] = {
-                    "precision": val_acc_at_step,
-                    "recall": val_prec_at_step,
-                    "accuracy": val_recall_at_step,
-                    "loss": val_loss_at_step
-                }
+                METRICS_DICT[model.global_step]['train'] = MetricEntry(
+                    precision=val_acc_at_step,
+                    recall=val_prec_at_step,
+                    accuracy=val_recall_at_step,
+                    loss=val_loss_at_step
+                )
 
                 if verbose:
                     print("\nLogging at step: ", model.global_step)
@@ -600,87 +601,30 @@ def time_dataloading(iterations, dataloader, is_lhotse=False):
     print(
         f'Average time per batch (size: {batch_size}): {exec_time/float(num_of_its)}')
 
+def update_metrics_on_disk():
+    metric_rows = []
+    for batch_num, entry_dict in METRICS_DICT.items():
+        train_entry = entry_dict['train'].to_list()
+        val_entry = entry_dict['val'].to_list()
+        metric_rows.append([batch_num, train_entry, val_entry])
+    
+    cols = ['batch_num', 'train_prec', 'train_rec', 'train_acc', 'train_loss', 'val_prec', 'val_rec', 'val_acc', 'val_loss']
+    metrics_df = pd.DataFrame(metric_rows, columns=cols)
 
-##################################################################
-####################  Setup Validation Data  ######################
-##################################################################
-# val_df = make_dataframe_from_text_data(
-#     val_data_text_path, switchboard_val_audios_hash)
+    # Concat with existing metrics if they exist
+    if os.path.isfile(metrics_file):
+        existing_df = pd.read_csv(metrics_file)
+        metrics_df = pd.concat([existing_df, metrics_df]) 
 
-# val_dataset = data_loaders.SwitchBoardLaughterDataset(
-#     df=val_df,
-#     audios_hash=switchboard_val_audios_hash,
-#     feature_fn=feature_fn,
-#     batch_size=batch_size,
-#     sr=sample_rate,
-#     subsample=False)
-
-# val_generator = torch.utils.data.DataLoader(
-#     val_dataset, num_workers=0, batch_size=batch_size, shuffle=True,
-#     collate_fn=collate_fn)
-
-# if train_on_noisy_audioset:
-#     import audio_set_loading  # from audio_set_loading import * #TODO
-#     with open(audioset_noisy_train_audio_pkl_path, "rb") as f:
-#         audioset_noisy_train_audios_hash = pickle.load(f)
-
-# data_dfs_path = os.path.join(data_root, data_dfs_dir)
-# val_df = pd.read_csv(os.path.join(data_dfs_path, 'dummy_df.csv'))
-
-# val_dataset = data_loaders.ICSILaughterDataset(
-#     df=val_df,
-#     audio_root=os.path.join(data_root, 'speech'),
-#     feature_fn=augmented_feature_fn,
-#     batch_size=batch_size,
-#     sr=sample_rate,
-#     subsample=False)
-
-# val_generator = torch.utils.data.DataLoader(
-#     val_dataset, num_workers=0, batch_size=batch_size, shuffle=True,
-#     collate_fn=collate_fn)
-
-##################################################################
-#######################  Run Training Loop  ######################
-##################################################################
-# train_df = pd.read_csv(os.path.join(data_dfs_path, 'dummy_df.csv'))
-
-
-# while model.global_step < num_train_steps:
-################## Set up Supervised Training ##################
-#print(f"First time through: {first_time_through}")
+    metrics_df.to_csv(metrics_file, index=False)
 
 print("Preparing training set...")
-# Create a list of list where each list is one datapoint of the form:
-# [region start, region duration, subsampled region start, subsampled region duration, audio path, label]
-# Note: returns a list not text because convert_to_text is set to False
-# lines = make_text_dataset(t_files_a, t_files_b, a_files, num_passes=1,
-#                           convert_to_text=False, include_words=include_words)
-# The second parameter - switchboard_train_audio_hash - is not used in the function
-# train_df = make_dataframe_from_text_data(
-#     lines, switchboard_train_audio_hash, sr=sample_rate)
-
-
-# train_dataset = data_loaders.ICSILaughterDataset(
-#     df=train_df,
-#     audio_root=os.path.join(data_root, 'speech'),
-#     feature_fn=augmented_feature_fn,
-#     batch_size=batch_size,
-#     sr=sample_rate,
-#     subsample=False)
-
-# print(f"Number of supervised datapoints: {len(train_dataset)}")
-
-# training_generator = torch.utils.data.DataLoader(
-#     train_dataset, num_workers=num_workers, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-
-# time_dataloading(1, training_generator)
-
 
 cutset_dir = os.path.join(data_root, 'lhotse', 'cutsets')
 
-dev_loader = load_data.create_dataloader(cutset_dir, 'dev')
+dev_loader = load_data.create_training_dataloader(cutset_dir, 'dev')
 
-train_loader = load_data.create_dataloader(cutset_dir, 'train')
+train_loader = load_data.create_training_dataloader(cutset_dir, 'train')
 # time_dataloading(1, lhotse_loader, is_lhotse=True)
 
 
@@ -705,5 +649,4 @@ print('---------------')
 print(
     f"Time per epoch time[in three different formats s/min/h]:\n{time_per_epoch:.2f}s\n{epoch_time_in_m:.2f}m\n{epoch_time_in_h:.2f}h")
 
-with open('metrics.json', 'w') as f:
-    json.dump(METRICS_DICT, f)
+update_metrics_on_disk()

@@ -5,7 +5,7 @@ from lhotse import RecordingSet
 from lad import LadDataset, InferenceDataset
 import os
 
-def create_dataloader(cutset_dir, split):
+def create_training_dataloader(cutset_dir, split):
     '''
     Create a dataloader for the provided split 
         - split needs to be one of 'train', 'dev' and 'test'
