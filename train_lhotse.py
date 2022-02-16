@@ -84,6 +84,8 @@ parser.add_argument('--config', type=str, required=True)
 # Set a directory to store model checkpoints and tensorboard. Creates a directory if doesn't exist
 parser.add_argument('--checkpoint_dir', type=str, required=True)
 
+parser.add_argument('--num_epochs', type=int, default=10)
+
 # Set root data directory containing "Signals/<meeting_id>/<channel>.sph audio files
 parser.add_argument('--data_root', type=str, required=True)
 
@@ -129,6 +131,7 @@ data_root = args.data_root
 data_dfs_dir = args.data_dfs_dir
 lhotse_dir = args.lhotse_dir
 batch_size = int(args.batch_size or config['batch_size'])
+num_epochs = args.num_epochs
 val_data_text_path = config['val_data_text_path']
 feature_fn = partial(config['feature_fn'], sr=sample_rate)
 augment_fn = config['augment_fn']
@@ -633,7 +636,6 @@ train_loader = load_data.create_training_dataloader(cutset_dir, 'train')
 # time_dataloading(1, lhotse_loader, is_lhotse=True)
 
 
-num_epochs = 1
 start_time = time.time()
 run_training_loop(n_epochs=num_epochs, model=model, device=device,
                   iterator=train_loader, checkpoint_dir=checkpoint_dir, optimizer=optimizer,
