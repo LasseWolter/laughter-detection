@@ -171,6 +171,10 @@ def compute_features():
 
         torch.set_num_threads(1)
 
+        # Pad all cuts in cutset to a minimum of 1s
+        # Do this because there are laugh segments that are shorter than 1s
+        cutset = cutset.pad(duration=1.0)
+
         # File in which the CutSet object (which contains feature metadata) was/will be stored
         cuts_with_feats_file = os.path.join(
             cutset_dir, f'{split}_cutset_with_feats.jsonl')
