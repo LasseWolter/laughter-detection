@@ -84,12 +84,13 @@ parser.add_argument('--config', type=str, required=True)
 # Set a directory to store model checkpoints and tensorboard. Creates a directory if doesn't exist
 parser.add_argument('--checkpoint_dir', type=str, required=True)
 
-parser.add_argument('--num_epochs', type=int, default=10)
-
 # Set root data directory containing "Signals/<meeting_id>/<channel>.sph audio files
 parser.add_argument('--data_root', type=str, required=True)
 
 ######## OPTIONAL ARGS #########
+# Number of epochs for which the training should run for
+parser.add_argument('--num_epochs', type=int, default=1)
+
 # Directory containing the Lhotse manifest, cutsets and feature representations 
 # This should be a relative path from the data_root-dir
 parser.add_argument('--lhotse_dir', type=str, default='lhotse')
