@@ -88,6 +88,10 @@ parser.add_argument('--checkpoint_dir', type=str, required=True)
 parser.add_argument('--data_root', type=str, required=True)
 
 ######## OPTIONAL ARGS #########
+# Directory containing the Lhotse manifest, cutsets and feature representations 
+# This should be a relative path from the data_root-dir
+parser.add_argument('--lhotse_dir', type=str, default='lhotse')
+
 # Directory containing the Dataframes for train, val, test data
 # These dataframes contain the segment information for speech/laughter segments
 parser.add_argument('--data_dfs_dir', type=str, default='data_dfs')
@@ -123,6 +127,7 @@ config = configs.CONFIG_MAP[args.config]
 checkpoint_dir = args.checkpoint_dir
 data_root = args.data_root
 data_dfs_dir = args.data_dfs_dir
+lhotse_dir = args.lhotse_dir
 batch_size = int(args.batch_size or config['batch_size'])
 val_data_text_path = config['val_data_text_path']
 feature_fn = partial(config['feature_fn'], sr=sample_rate)
@@ -620,7 +625,7 @@ def update_metrics_on_disk():
 
 print("Preparing training set...")
 
-cutset_dir = os.path.join(data_root, 'lhotse', 'cutsets')
+cutset_dir = os.path.join(data_root, lhotse_dir, 'cutsets')
 
 dev_loader = load_data.create_training_dataloader(cutset_dir, 'dev')
 
