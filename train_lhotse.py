@@ -606,7 +606,7 @@ def update_metrics_on_disk():
     for batch_num, entry_dict in METRICS_DICT.items():
         train_entry = entry_dict['train'].to_list()
         val_entry = entry_dict['val'].to_list()
-        metric_rows.append([batch_num, train_entry, val_entry])
+        metric_rows.append([batch_num] + train_entry + val_entry)
     
     cols = ['batch_num', 'train_prec', 'train_rec', 'train_acc', 'train_loss', 'val_prec', 'val_rec', 'val_acc', 'val_loss']
     metrics_df = pd.DataFrame(metric_rows, columns=cols)
