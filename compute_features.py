@@ -189,3 +189,7 @@ def compute_features():
             # At the top are all speech rows and the bottom all laugh rows
             cuts = cuts.shuffle()
             cuts.to_jsonl(cuts_with_feats_file)
+
+
+if __name__ == "__main__":
+    compute_features()
