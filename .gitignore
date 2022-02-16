@@ -61,3 +61,4 @@ data/icsi/*speech
 data/rtf_samples/*
 data/icsi/*/feats/*
 data/icsi/test*
+data/icsi/feats/
