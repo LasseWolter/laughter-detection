@@ -151,10 +151,14 @@ def compute_features():
                 rec = icsi[split]['recordings'][meeting_id]
             # Create supervision segment indicating laughter or non-laughter by passing a
             # dict to the custom field -> {'is_laugh': 0/1}
+            # TODO: change duration from hardcoded to a value from a config file
             sup = SupervisionSegment(id=f'sup_{split}_{ind}', recording_id=rec.id, start=row.sub_start,
-                                     duration=row.sub_duration, channel=chan_id, custom={'is_laugh': row.label})
+                                     duration=1.0, channel=chan_id, custom={'is_laugh': row.label})
+
+            # Pad cut-subsample to a minimum of 1s
+            # Do this because there are laugh segments that are shorter than 1s
             cut = MonoCut(id=f'{split}_{ind}', start=row.sub_start, duration=row.sub_duration,
-                          recording=rec, channel=chan_id, supervisions=[sup])
+                          recording=rec, channel=chan_id, supervisions=[sup]).pad(duration=1.0)
             cut_list.append(cut)
 
         cutset_dict[split] = CutSet.from_cuts(cut_list)
@@ -170,10 +174,6 @@ def compute_features():
         f2 = Fbank(FbankConfig(num_filters=128, frame_shift=0.02275))
 
         torch.set_num_threads(1)
-
-        # Pad all cuts in cutset to a minimum of 1s
-        # Do this because there are laugh segments that are shorter than 1s
-        cutset = cutset.pad(duration=1.0)
 
         # File in which the CutSet object (which contains feature metadata) was/will be stored
         cuts_with_feats_file = os.path.join(
