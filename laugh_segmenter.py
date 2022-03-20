@@ -54,24 +54,62 @@ def lowpass(sig, filter_order=2, cutoff=0.01):
     # Apply the filter
     return(signal.filtfilt(B, A, sig))
 
+def fix_over_underflow(prob):
+    ''' 
+    Fixes probability that is out of the range (0,1) and sets them to
+    This seems to be a bug in the code taken from Gillick et al.
+    1 or slightly larger than 0 because threshold 0 shouldn't rule them out
 
-def get_laughter_instances(probs, threshold=0.5, min_length=0.2, fps=100.):
-    instances = []
-    current_list = []
-    for i in range(len(probs)):
-        if np.min(probs[i:i+1]) > threshold:
-            current_list.append(i)
-        else:
-            if len(current_list) > 0:
-                instances.append(current_list)
-                current_list = []
-    if len(current_list) > 0:
-        instances.append(current_list)
-    instances = [frame_span_to_time_span(
-        collapse_to_start_and_end_frame(i), fps=fps) for i in instances]
-    instances = [inst for inst in instances if inst[1]-inst[0] > min_length]
-    return instances
+    '''
+    if prob > 1: 
+        print('over 1')
+        return 1
+    # <= to count also create predictions for threshold=0 when prob is 0
+    if prob <= 0: 
+        print('lower or equal 0')
+        return 0.0000001
 
+    else: return prob
+    
+
+def get_laughter_instances(probs, thresholds=[0.5], min_lengths=[0.2], fps=100.):
+    '''
+    Calculates laughter instances from passed probabilities. For each of the given settings. 
+    Settings can be passed using a list of thresholds and a list of min_length values.
+    The function will return a dict of the following format: 
+    {
+        (threshold, min_length): [laugh_instances],
+        (threshold, min_length): [laugh_instances],
+        (threshold, min_length): [laugh_instances]
+    }
+    '''
+    instance_dict = {}
+
+    settings = [(thr, min_l) for thr in thresholds for min_l in min_lengths]
+    for thr, min_l in settings:
+        instances = []
+        current_list = []
+        probs = list(map(fix_over_underflow, probs))
+        for i in range(len(probs)):
+            # Check if this AND the following frame are laughter
+            if np.min(probs[i:i+1]) > thr:
+                current_list.append(i)
+            else:
+                if len(current_list) > 0:
+                    instances.append(current_list)
+                    current_list = []
+        # If there is something left, append last list to instances
+        if len(current_list) > 0:
+            instances.append(current_list)
+        # Reduce each laugh instance to it's start and end-frame
+        instances = [frame_span_to_time_span(
+            collapse_to_start_and_end_frame(i), fps=fps) for i in instances]
+        
+        # Filter out those instances that don't meet the min_length
+        instances = [inst for inst in instances if inst[1]-inst[0] > min_l]
+        instance_dict[(thr,min_l)]= instances
+
+    return instance_dict
 
 def get_feature_list(y, sr, window_size=37):
     mfcc_feat = compute_features.compute_mfcc_features(y, sr)

@@ -26,15 +26,15 @@ import data_loaders
 import audio_utils
 import dataset_utils
 
-sample_rate = 8000
+sample_rate = 8000 
 
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--model_path', type=str,
                     default='checkpoints/in_use/resnet_with_augmentation')
 parser.add_argument('--config', type=str, default='resnet_with_augmentation')
-parser.add_argument('--threshold', type=str, default='0.5')
-parser.add_argument('--min_length', type=str, default='0.2')
+parser.add_argument('--thresholds', type=str, default='0.5', help='Single value or comma-separated list of thresholds to evaluate')
+parser.add_argument('--min_lengths', type=str, default='0.2', help='Single value or comma-separated list of min_lengths to evaluate')
 parser.add_argument('--input_audio_file', required=True, type=str)
 parser.add_argument('--output_dir', type=str, default=None)
 parser.add_argument('--save_to_audio_files', type=str, default='True')
@@ -46,11 +46,14 @@ args = parser.parse_args()
 model_path = args.model_path
 config = configs.CONFIG_MAP[args.config]
 audio_path = args.input_audio_file
-threshold = float(args.threshold)
-min_length = float(args.min_length)
 save_to_audio_files = bool(strtobool(args.save_to_audio_files))
 save_to_textgrid = bool(strtobool(args.save_to_textgrid))
 output_dir = args.output_dir
+
+
+# Turn comma-separated parameter strings into list of floats 
+thresholds = [float(t) for t in args.thresholds.split(',')]
+min_lengths = [float(l) for l in args.min_lengths.split(',')]
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device {device}")
@@ -113,24 +116,39 @@ def load_and_pred(audio_path):
 
     probs = laugh_segmenter.lowpass(probs)
     instances = laugh_segmenter.get_laughter_instances(
-        probs, threshold=threshold, min_length=float(args.min_length), fps=fps)
+        probs, thresholds=thresholds, min_lengths=min_lengths, fps=fps)
 
     time_taken = time.time() - start_time  # stop measuring time
     print(f'Completed in: {time_taken:.2f}s')
-    print()
-    print("found %d laughs." % (len(instances)))
 
+     # Get a list of instance for each setting passed in  
+    instance_dict = laugh_segmenter.get_laughter_instances(
+        probs, thresholds=thresholds, min_lengths=min_lengths, fps=fps)
+
+    for setting, instances in instance_dict.items():
+        print(f"Found {len(instances)} laughs for threshold {setting[0]} and min_length {setting[1]}.") 
+        instance_output_dir = os.path.join(output_dir, f't_{setting[0]}', f'l_{setting[1]}')
+        save_instances(instances, instance_output_dir, save_to_audio_files, save_to_textgrid)
+
+    return time_taken
+
+def save_instances(instances, output_dir, save_to_audio_files, save_to_textgrid):
+    '''
+    Saves given instances to disk in a form that is specified by the passed parameters. 
+    Possible forms:
+        1. as audio file
+        2. as textgrid file
+    '''
+    os.system(f"mkdir -p {output_dir}")
     if len(instances) > 0:
-        full_res_y, full_res_sr = librosa.load(audio_path, sr=44100)
-        wav_paths = []
-        maxv = np.iinfo(np.int16).max
-
         if save_to_audio_files:
+            full_res_y, full_res_sr = librosa.load(audio_path, sr=44100)
+            wav_paths = []
+            maxv = np.iinfo(np.int16).max
             if output_dir is None:
                 raise Exception(
                     "Need to specify an output directory to save audio files")
             else:
-                os.system(f"mkdir -p {output_dir}")
                 for index, instance in enumerate(instances):
                     laughs = laugh_segmenter.cut_laughter_segments(
                         [instance], full_res_y, full_res_sr)
@@ -148,13 +166,10 @@ def load_and_pred(audio_path):
             tg.add_tier(laughs_tier)
             fname = os.path.splitext(os.path.basename(audio_path))[0]
             tgt.write_to_file(tg, os.path.join(
-                output_dir, fname + '_laughter.TextGrid'))
+                output_dir, fname + '.TextGrid'))
 
             print('Saved laughter segments in {}'.format(
                 os.path.join(output_dir, fname + '_laughter.TextGrid')))
-
-    return time_taken
-
 
 def i_pred():
     """
@@ -191,3 +206,6 @@ def calc_real_time_factor(audio_path, iterations):
     av_real_time_factor = av_time/audio_length
     print(
         f"Average Realtime Factor over {iterations} iterations: {av_real_time_factor:.2f}")
+
+if __name__ == '__main__':
+    load_and_pred(audio_path)
